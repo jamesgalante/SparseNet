@@ -112,6 +112,11 @@ def create_PWM_for_top_N_nodes(layer, receptive_field, num_top_nodes, data_dir, 
 	for rank in range(num_top_nodes):
 		node_idx = node_order[rank]
 		sequences = node_sequences[rank]
+
+		# Skip nodes with no sequences
+		if len(sequences) == 0:
+			print(f"Warning: No sequences found for node {node_idx} (rank {rank}). Skipping.")
+			continue
 		
 		pwm = np.stack(sequences).mean(axis=0)
 		activations = top_activations[rank]
@@ -154,83 +159,167 @@ def create_PWM_for_top_N_nodes(layer, receptive_field, num_top_nodes, data_dir, 
 	return pwm_results
 
 
-def plot_node_pwms_from_meta(data_dir, max_nodes=None):
-	"""Plot PWMs from metadata file."""
-	
-	# Raise error if pwm_meta.json does not exist in data_dir
-	if not os.path.exists(os.path.join(data_dir, 'pwm_meta.json')):
-		raise FileNotFoundError("pwm_meta.json does not exist in the current directory")
-	
-	with open(os.path.join(data_dir, 'pwm_meta.json')) as f:
-		meta = json.load(f)
-	
-	output_dir = meta['output_dir']
-	layer = meta['layer']
-	
-	logo_dir = os.path.join(output_dir, "logos")
-	os.makedirs(logo_dir, exist_ok=True)
-	
-	# Load the PFM data and filter nodes
-	data = np.load(meta['pwm_file'])
-	sorted_nodes = list(meta['node_info'].items())
-	if max_nodes:
-		sorted_nodes = sorted_nodes[:max_nodes]
-	
-	# Individual plots
-	for node_idx, info in tqdm(sorted_nodes, desc="Plotting logos"):
-		rank = info['rank']
-		pfm = data[f"node_{node_idx}"]
-		
-		# Add small pseudocount to avoid division by zero
-		pseudocount = 0.0001
-		pfm_with_pseudo = pfm + pseudocount
-		
-		# Normalize to get Position Probability Matrix (PPM)
-		ppm = pfm_with_pseudo / pfm_with_pseudo.sum(axis=0, keepdims=True)
-		
-		# Calculate information content for each position
-		# IC = log2(4) - entropy = 2 - entropy for DNA
-		entropy = -np.sum(ppm * np.log2(ppm), axis=0)
-		ic = 2.0 - entropy  # Maximum 2 bits for DNA
-		
-		# Scale PPM by information content for sequence logo
-		logo_matrix = ppm * ic
-		
-		# Plot the logo
-		fig, ax = plt.subplots(figsize=(12, 3))
-		plot_logo(logo_matrix, ax=ax)
-		ax.set_title(f'Node {node_idx} (rank {rank}) - Layer {layer}')
-		ax.set_ylabel('Information content (bits)')
-		plt.tight_layout()
-		plt.savefig(os.path.join(logo_dir, f'node_{node_idx}_rank_{rank}.png'), dpi=150, bbox_inches='tight')
-		plt.close()
-	
-	# Grid plot
-	top_n = min(20, len(sorted_nodes))
-	ncols = 4
-	nrows = int(np.ceil(top_n / ncols))
-	
-	fig, axes = plt.subplots(nrows, ncols, figsize=(20, nrows*2.5))
-	axes = axes.flatten() if nrows > 1 else [axes]
-	
-	for idx, (node_idx_str, info) in enumerate(sorted_nodes[:top_n]):
-		pfm = data[f"node_{int(node_idx_str)}"]
-		
-		# Apply same transformation for grid plot
-		pseudocount = 0.0001
-		pfm_with_pseudo = pfm + pseudocount
-		ppm = pfm_with_pseudo / pfm_with_pseudo.sum(axis=0, keepdims=True)
-		entropy = -np.sum(ppm * np.log2(ppm), axis=0)
-		ic = 2.0 - entropy
-		logo_matrix = ppm * ic
-		
-		plot_logo(logo_matrix, ax=axes[idx])
-		axes[idx].set_title(f'Node {node_idx_str} (rank {info["rank"]})', fontsize=10)
-	
-	for idx in range(top_n, len(axes)):
-		axes[idx].axis('off')
-	
-	plt.suptitle(f'Top {top_n} Nodes - Layer {layer}', fontsize=16)
-	plt.tight_layout()
-	plt.savefig(os.path.join(output_dir, f'top{top_n}_grid.png'), dpi=150, bbox_inches='tight')
-	plt.close()
+# def plot_node_pwms_from_meta(data_dir, max_nodes=None):
+# 	"""Plot PWMs from metadata file."""
+# 	
+# 	# Raise error if pwm_meta.json does not exist in data_dir
+# 	if not os.path.exists(os.path.join(data_dir, 'pwm_meta.json')):
+# 		raise FileNotFoundError("pwm_meta.json does not exist in the current directory")
+# 	
+# 	with open(os.path.join(data_dir, 'pwm_meta.json')) as f:
+# 		meta = json.load(f)
+# 	
+# 	output_dir = meta['output_dir']
+# 	layer = meta['layer']
+# 	
+# 	# Load the PFM data and filter nodes
+# 	data = np.load(meta['pwm_file'])
+# 	sorted_nodes = list(meta['node_info'].items())
+# 	if max_nodes:
+# 		sorted_nodes = sorted_nodes[:max_nodes]
+# 	
+# 	# Grid plot - show all nodes (or max_nodes if specified)
+# 	total_nodes = len(sorted_nodes)
+# 	ncols = 4
+# 	nrows = int(np.ceil(total_nodes / ncols))
+# 	
+# 	fig, axes = plt.subplots(nrows, ncols, figsize=(20, nrows*2.5))
+# 	axes = axes.flatten()
+# 	
+# 	for idx, (node_idx_str, info) in enumerate(tqdm(sorted_nodes, desc="Plotting grid")):
+# 		pfm = data[f"node_{int(node_idx_str)}"]
+# 		
+# 		# Apply transformation for grid plot
+# 		pseudocount = 0.0001
+# 		pfm_with_pseudo = pfm + pseudocount
+# 		ppm = pfm_with_pseudo / pfm_with_pseudo.sum(axis=0, keepdims=True)
+# 		entropy = -np.sum(ppm * np.log2(ppm), axis=0)
+# 		ic = 2.0 - entropy
+# 		logo_matrix = ppm * ic
+# 		
+# 		plot_logo(logo_matrix, ax=axes[idx])
+# 		axes[idx].set_title(f'Node {node_idx_str} (rank {info["rank"]})', fontsize=10)
+# 	
+# 	# Turn off any unused subplots
+# 	for idx in range(total_nodes, len(axes)):
+# 		axes[idx].axis('off')
+# 	
+# 	plt.suptitle(f'All {total_nodes} Nodes - Layer {layer}', fontsize=16)
+# 	plt.tight_layout()
+# 	plt.show()
+
+def plot_node_pwms_from_meta(data_dir, max_nodes=None, save_path=None, show=True):
+    """Plot PWMs from metadata file; optionally save to PNG instead of showing."""
+    if not os.path.exists(os.path.join(data_dir, "pwm_meta.json")):
+        raise FileNotFoundError("pwm_meta.json does not exist in the current directory")
+
+    with open(os.path.join(data_dir, "pwm_meta.json")) as f:
+        meta = json.load(f)
+
+    layer = meta["layer"]
+
+    # Load the PFM data and filter nodes
+    data = np.load(meta["pwm_file"])
+    sorted_nodes = list(meta["node_info"].items())
+    if max_nodes:
+        sorted_nodes = sorted_nodes[:max_nodes]
+
+    # Grid plot - show all nodes (or max_nodes if specified)
+    total_nodes = len(sorted_nodes)
+    ncols = 4
+    nrows = int(np.ceil(total_nodes / ncols))
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(20, nrows * 2.5))
+    axes = axes.flatten()
+
+    for idx, (node_idx_str, info) in enumerate(
+        tqdm(sorted_nodes, desc="Plotting grid")
+    ):
+        pfm = data[f"node_{int(node_idx_str)}"]
+
+        # Apply transformation for grid plot
+        pseudocount = 0.0001
+        pfm_with_pseudo = pfm + pseudocount
+        ppm = pfm_with_pseudo / pfm_with_pseudo.sum(axis=0, keepdims=True)
+        entropy = -np.sum(ppm * np.log2(ppm), axis=0)
+        ic = 2.0 - entropy
+        logo_matrix = ppm * ic
+
+        plot_logo(logo_matrix, ax=axes[idx])
+        axes[idx].set_title(f"Node {node_idx_str} (rank {info['rank']})", fontsize=10)
+
+    # Turn off any unused subplots
+    for idx in range(total_nodes, len(axes)):
+        axes[idx].axis("off")
+
+    plt.suptitle(f"All {total_nodes} Nodes - Layer {layer}", fontsize=16)
+    plt.tight_layout()
+
+    if save_path is not None:
+        plt.savefig(save_path, dpi=300)
+
+    if show:
+        plt.show()
+    else:
+        plt.close(fig)
+
+
+def compute_pwms_for_all_layers(
+    trainer,
+    loader,
+    activations_dir,
+    pwm_root_dir,
+    latent_dim,
+    num_top_nodes,
+    num_samples_per_node,
+):
+    """
+    Convenience function: compute PWMs for all SAE layers and save a grid figure
+    for each layer in its own directory.
+
+    Layout on disk:
+        pwm_root_dir/
+            layer0/
+                pwms.npz
+                pwm_meta.json
+                pwm_grid.png
+            layer1/
+                ...
+    """
+    os.makedirs(pwm_root_dir, exist_ok=True)
+
+    num_layers = len(trainer.layers)
+    print(f"Computing PWMs for {num_layers} layers into {pwm_root_dir}")
+
+    for layer_idx in range(num_layers):
+        # Your receptive-field convention
+        receptive_field = 21 if layer_idx == 0 else 21 + 2 ** (layer_idx + 1)
+
+        layer_dir = os.path.join(pwm_root_dir, f"layer{layer_idx}")
+        os.makedirs(layer_dir, exist_ok=True)
+
+        print(f"\n=== Layer {layer_idx} ({trainer.layers[layer_idx]}) ===")
+        pwm_results = create_PWM_for_top_N_nodes(
+            layer=layer_idx,
+            receptive_field=receptive_field,
+            num_top_nodes=num_top_nodes,
+            data_dir=activations_dir,
+            out_dir=layer_dir,
+            loader=loader,
+            latent_dim=latent_dim,
+            num_samples_per_node=num_samples_per_node,
+        )
+
+        print(
+            f"  Saved {len(pwm_results)} PWMs for layer {layer_idx} to {layer_dir}"
+        )
+
+        # Save a grid image of all PWMs for this layer
+        grid_path = os.path.join(layer_dir, "pwm_grid.png")
+        plot_node_pwms_from_meta(
+            data_dir=layer_dir,
+            max_nodes=None,
+            save_path=grid_path,
+            show=False,
+        )
+        print(f"  Saved PWM grid to {grid_path}")

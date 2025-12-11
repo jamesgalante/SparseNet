@@ -557,19 +557,192 @@ class SequenceNodeVisualizer:
         plt.tight_layout()
         plt.show()
 
-        print(
-            f"\nShowing all nodes with |activation| > {threshold} "
-            f"for positions {start}-{end}:"
-        )
-        for pos, nodes_for_pos in zip(positions, pos_nodes):
-            if not nodes_for_pos:
-                print(f"  Position {pos}: no activated nodes.")
+        # print(
+        #     f"\nShowing all nodes with |activation| > {threshold} "
+        #     f"for positions {start}-{end}:"
+        # )
+        # for pos, nodes_for_pos in zip(positions, pos_nodes):
+        #     if not nodes_for_pos:
+        #         print(f"  Position {pos}: no activated nodes.")
+        #         continue
+        #     print(f"  Position {pos}:")
+        #     for node_idx, act_val in nodes_for_pos:
+        #         node_info = self.pwm_meta["node_info"].get(str(node_idx), {})
+        #         rank = node_info.get("rank", "N/A")
+        #         print(
+        #             f"    Node {node_idx:4d} (rank {rank}): "
+        #             f"activation = {act_val:.4f}"
+        #         )
+
+    def show_position_range_all_layers(self, sample_idx, start_pos, end_pos, 
+                                    pwm_root_dir, threshold=0.0, max_nodes_per_pos=3):
+        """
+        Show activated nodes across ALL layers for a range of positions.
+        
+        Parameters
+        ----------
+        sample_idx : int
+            Sample to visualize
+        start_pos : int
+            Start position (0-based, relative to activation window)
+        end_pos : int
+            End position (inclusive)
+        pwm_root_dir : str
+            Root directory containing layer0/, layer1/, etc. subdirectories with PWMs
+        threshold : float
+            Minimum |activation| to include
+        max_nodes_per_pos : int
+            Maximum number of nodes to show per position (top by activation)
+        """
+        # Load sample data if not already loaded
+        if self.current_sample_idx != sample_idx:
+            print(f"Loading sample {sample_idx}...")
+            Xi, yi, activations = self.load_sample_data(sample_idx)
+            self.current_Xi = Xi
+            self.current_signal = yi
+            self.current_activations = activations
+            self.current_sample_idx = sample_idx
+        
+        # Load PWM data for ALL layers
+        pwm_data_per_layer = {}
+        pwm_meta_per_layer = {}
+        
+        for layer_idx in range(self.num_layers):
+            layer_dir = os.path.join(pwm_root_dir, f'layer{layer_idx}')
+            if not os.path.exists(layer_dir):
                 continue
-            print(f"  Position {pos}:")
-            for node_idx, act_val in nodes_for_pos:
-                node_info = self.pwm_meta["node_info"].get(str(node_idx), {})
-                rank = node_info.get("rank", "N/A")
-                print(
-                    f"    Node {node_idx:4d} (rank {rank}): "
-                    f"activation = {act_val:.4f}"
-                )
+            
+            meta_path = os.path.join(layer_dir, 'pwm_meta.json')
+            if os.path.exists(meta_path):
+                with open(meta_path) as f:
+                    meta = json.load(f)
+                    pwm_path = meta.get('pwm_file')
+                    if pwm_path and os.path.exists(pwm_path):
+                        pwm_data_per_layer[layer_idx] = np.load(pwm_path)
+                        pwm_meta_per_layer[layer_idx] = meta
+        
+        print(f"Loaded PWMs for {len(pwm_data_per_layer)} layers")
+        
+        # Validate position range
+        start = max(0, start_pos)
+        end = min(self.rows_per_locus - 1, end_pos)
+        if start > end:
+            print(f"Error: invalid range after clipping: {start}-{end}.")
+            return
+        
+        positions = list(range(start, end + 1))
+        n_positions = len(positions)
+        
+        # Build dense activations and collect nodes for each layer
+        layer_pos_nodes = {}
+        
+        for layer_idx in sorted(pwm_data_per_layer.keys()):
+            layer_acts = self.current_activations[:, layer_idx, :, :]
+            
+            # Build dense activation matrix
+            max_idx_acts = int(layer_acts[:, :, 0].max())
+            pwm_node_indices = [
+                int(k.split('_')[1]) 
+                for k in pwm_data_per_layer[layer_idx].keys() 
+                if k.startswith('node_')
+            ]
+            max_idx_pwms = max(pwm_node_indices) if pwm_node_indices else -1
+            latent_dim = max(max_idx_acts, max_idx_pwms) + 1
+            
+            dense_acts = np.zeros((self.rows_per_locus, latent_dim), dtype=np.float32)
+            for pos in range(self.rows_per_locus):
+                indices = layer_acts[pos, :, 0].astype(int)
+                values = layer_acts[pos, :, 1]
+                dense_acts[pos, indices] = values
+            
+            # Collect nodes for each position
+            layer_pos_nodes[layer_idx] = []
+            for pos in positions:
+                act = dense_acts[pos]
+                mask = np.abs(act) > threshold
+                node_idx = np.where(mask)[0]
+                
+                if node_idx.size == 0:
+                    layer_pos_nodes[layer_idx].append([])
+                    continue
+                
+                vals = np.abs(act[node_idx])
+                order = np.argsort(vals)[::-1][:max_nodes_per_pos]
+                nodes_for_pos = list(zip(node_idx[order], vals[order]))
+                layer_pos_nodes[layer_idx].append(nodes_for_pos)
+        
+        # Create figure: rows = layers, cols = positions
+        n_layers_with_pwms = len(layer_pos_nodes)
+        if n_layers_with_pwms == 0:
+            print("No layers with PWMs available!")
+            return
+        
+        fig, axes = plt.subplots(
+            n_layers_with_pwms, n_positions,
+            figsize=(3.5 * n_positions, 3 * n_layers_with_pwms)
+        )
+        
+        if n_layers_with_pwms == 1 and n_positions == 1:
+            axes = np.array([[axes]])
+        elif n_layers_with_pwms == 1:
+            axes = axes.reshape(1, n_positions)
+        elif n_positions == 1:
+            axes = axes.reshape(n_layers_with_pwms, 1)
+        
+        # Plot each layer × position
+        layer_row = 0
+        for layer_idx in sorted(layer_pos_nodes.keys()):
+            pos_nodes = layer_pos_nodes[layer_idx]
+            pwm_data = pwm_data_per_layer[layer_idx]
+            
+            for col, pos in enumerate(positions):
+                ax = axes[layer_row, col]
+                nodes_for_pos = pos_nodes[col]
+                
+                if len(nodes_for_pos) == 0:
+                    ax.text(0.5, 0.5, 'No activation', 
+                        ha='center', va='center', fontsize=9)
+                    ax.axis('off')
+                    if col == 0:
+                        ax.set_ylabel(f'L{layer_idx}', fontsize=10, fontweight='bold')
+                    if layer_row == 0:
+                        ax.set_title(f'Pos {pos}', fontsize=10, fontweight='bold')
+                    continue
+                
+                # Show most activated node's logo
+                node_idx, act_val = nodes_for_pos[0]
+                pwm_key = f'node_{node_idx}'
+                
+                if pwm_key not in pwm_data:
+                    ax.text(0.5, 0.5, f'N{node_idx}\nNo PWM', 
+                        ha='center', va='center', fontsize=8)
+                    ax.axis('off')
+                else:
+                    pfm = pwm_data[pwm_key]
+                    pseudocount = 1e-4
+                    pfm_pseudo = pfm + pseudocount
+                    ppm = pfm_pseudo / pfm_pseudo.sum(axis=0, keepdims=True)
+                    entropy = -np.sum(ppm * np.log2(ppm), axis=0)
+                    ic = 2.0 - entropy
+                    logo_matrix = ppm * ic
+                    plot_logo(logo_matrix, ax=ax)
+                
+                node_info_str = f'N{node_idx} ({act_val:.2f})'
+                if len(nodes_for_pos) > 1:
+                    node_info_str += f'\n+{len(nodes_for_pos)-1}'
+                
+                ax.set_title(node_info_str, fontsize=8)
+                
+                if col == 0:
+                    ax.set_ylabel(f'L{layer_idx}', fontsize=10, fontweight='bold')
+                if layer_row == 0:
+                    ax.set_title(f'Pos {pos}\n{node_info_str}', fontsize=8)
+            
+            layer_row += 1
+        
+        plt.suptitle(
+            f'All layers: sample {sample_idx}, positions {start}-{end}',
+            fontsize=14, fontweight='bold'
+        )
+        plt.tight_layout()
+        plt.show()

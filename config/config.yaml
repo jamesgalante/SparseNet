@@ -1,0 +1,29 @@
+base_dir: null  # or "/scratch/users/jgalante/SparseNet/p53"
+
+latent_base_channels: 64
+
+samples:
+  p53:
+    peaks_bed: "resources/peaks_inliers.bed"
+    negatives_bed: "resources/gc_negatives.bed"
+    seqs: "resources/genome.fa"
+    signal_plus: "resources/experiment_plus.bw"
+    signal_minus: "resources/experiment_minus.bw"
+    ctl_plus: "resources/control_plus.bw"
+    ctl_minus: "resources/control_minus.bw"
+    model_path: "resources/model.h5"
+
+sae_grid:
+  ef4_tf0p05_cl1000_e3_bs16384_lr1e-3:
+    expansion_factor: 4.0
+    topk_fraction: 0.05
+    center_len: 1000
+    epochs: 3
+    inner_bs: 16384
+    lr: 0.001
+
+pwm_grid:
+  top256_samp1000_ef4:
+    num_top_nodes: 256
+    num_samples_per_node: 1000
+    expansion_factor: 4.0

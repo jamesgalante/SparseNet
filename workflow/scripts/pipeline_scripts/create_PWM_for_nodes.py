@@ -263,9 +263,7 @@ def plot_node_pwms_from_meta(data_dir, max_nodes=None, save_path=None, show=True
     else:
         plt.close(fig)
 
-
 def compute_pwms_for_all_layers(
-    trainer,
     loader,
     activations_dir,
     pwm_root_dir,
@@ -289,6 +287,14 @@ def compute_pwms_for_all_layers(
     os.makedirs(pwm_root_dir, exist_ok=True)
 
     num_layers = len(trainer.layers)
+ 
+    meta_path = os.path.join(activations_dir, "meta.json")
+    with open(meta_path) as f:
+        meta = json.load(f)
+    
+    layer_names = meta["layers"]
+    num_layers = len(layer_names)
+    
     print(f"Computing PWMs for {num_layers} layers into {pwm_root_dir}")
 
     for layer_idx in range(num_layers):
@@ -298,7 +304,7 @@ def compute_pwms_for_all_layers(
         layer_dir = os.path.join(pwm_root_dir, f"layer{layer_idx}")
         os.makedirs(layer_dir, exist_ok=True)
 
-        print(f"\n=== Layer {layer_idx} ({trainer.layers[layer_idx]}) ===")
+        print(f"\n=== Layer {layer_idx} ({layer_names[layer_idx]}) ===")
         pwm_results = create_PWM_for_top_N_nodes(
             layer=layer_idx,
             receptive_field=receptive_field,

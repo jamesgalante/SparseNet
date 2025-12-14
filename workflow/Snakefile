@@ -1,9 +1,4 @@
-# workflow/Snakefile
-# Run from repo root:
-#   snakemake -s workflow/Snakefile --use-conda
-
 configfile: "config/config.yaml"
-
 import os
 
 def resolve_base(relpath: str) -> str:
@@ -12,18 +7,22 @@ def resolve_base(relpath: str) -> str:
     return relpath
   return os.path.join(base, relpath)
 
+# convenience
+SAMPLES = list(config["samples"].keys())
+EF = config["sae_grid"]["expansion_factor"]
+TF = config["sae_grid"]["topk_fraction"]
+CL = config["sae_grid"]["center_len"]
+NS = config["pwm_grid"]["num_samples_per_node"]
+
 rule all:
   input:
     expand(
-      resolve_base("results/{sample}/sae/{sae_tok}/activations/meta.json"),
-      sample=config["samples"].keys(),
-      sae_tok=config["sae_grid"].keys()
+      resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}/activations/meta.json"),
+      sample=SAMPLES, ef=EF, tf=TF, cl=CL
     ),
     expand(
-      resolve_base("results/{sample}/sae/{sae_tok}/pwms/{pwm_tok}/.done"),
-      sample=config["samples"].keys(),
-      sae_tok=config["sae_grid"].keys(),
-      pwm_tok=config["pwm_grid"].keys()
+      resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}/pwms/ns{ns}/.done"),
+      sample=SAMPLES, ef=EF, tf=TF, cl=CL, ns=NS
     )
 
 rule train_and_collect:
@@ -37,36 +36,33 @@ rule train_and_collect:
     ctl_minus=lambda wc: resolve_base(config["samples"][wc.sample]["ctl_minus"]),
     model_path=lambda wc: resolve_base(config["samples"][wc.sample]["model_path"])
   output:
-    meta=resolve_base("results/{sample}/sae/{sae_tok}/activations/meta.json"),
-    freq_plot=resolve_base("results/{sample}/sae/{sae_tok}/activations/node_activation_frequencies.png")
+    meta=resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}/activations/meta.json"),
+    freq_plot=resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}/activations/node_activation_frequencies.png")
   params:
-    out_dir=resolve_base("results/{sample}/sae/{sae_tok}"),
-    sae_params=lambda wc: config["sae_grid"][wc.sae_tok]
-  conda:
-    "workflow/envs/bpnetlite.yaml"
+    out_dir=resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}"),
+    epochs=config["sae_grid"]["epochs"],
+    inner_bs=config["sae_grid"]["inner_bs"],
+    lr=config["sae_grid"]["lr"]
+  conda: "envs/bpnetlite.yaml"
   resources:
     gpu=1
-  script:
-    "workflow/scripts/train_and_collect.py"
+  script: "scripts/train_and_collect.py"
 
 rule compute_pwms:
   input:
-    activations_meta=resolve_base("results/{sample}/sae/{sae_tok}/activations/meta.json"),
-    peaks=lambda wc: config["samples"][wc.sample]["peaks_bed"],
-    negatives=lambda wc: config["samples"][wc.sample]["negatives_bed"],
-    seqs=lambda wc: config["samples"][wc.sample]["seqs"],
-    signal_plus=lambda wc: config["samples"][wc.sample]["signal_plus"],
-    signal_minus=lambda wc: config["samples"][wc.sample]["signal_minus"],
-    ctl_plus=lambda wc: config["samples"][wc.sample]["ctl_plus"],
-    ctl_minus=lambda wc: config["samples"][wc.sample]["ctl_minus"]
+    activations_meta=resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}/activations/meta.json"),
+    peaks=lambda wc: resolve_base(config["samples"][wc.sample]["peaks_bed"]),
+    negatives=lambda wc: resolve_base(config["samples"][wc.sample]["negatives_bed"]),
+    seqs=lambda wc: resolve_base(config["samples"][wc.sample]["seqs"]),
+    signal_plus=lambda wc: resolve_base(config["samples"][wc.sample]["signal_plus"]),
+    signal_minus=lambda wc: resolve_base(config["samples"][wc.sample]["signal_minus"]),
+    ctl_plus=lambda wc: resolve_base(config["samples"][wc.sample]["ctl_plus"]),
+    ctl_minus=lambda wc: resolve_base(config["samples"][wc.sample]["ctl_minus"])
   output:
-    done=resolve_base("results/{sample}/sae/{sae_tok}/pwms/{pwm_tok}/.done")
+    done=resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}/pwms/ns{ns}/.done")
   params:
-    activations_dir=resolve_base("results/{sample}/sae/{sae_tok}/activations"),
-    pwm_root_dir=resolve_base("results/{sample}/sae/{sae_tok}/pwms/{pwm_tok}"),
-    pwm_params=lambda wc: config["pwm_grid"][wc.pwm_tok],
+    activations_dir=resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}/activations"),
+    pwm_root_dir=resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}/pwms/ns{ns}"),
     latent_base_channels=config.get("latent_base_channels", 64)
-  conda:
-    "workflow/envs/bpnetlite.yaml"
-  script:
-    "workflow/scripts/compute_pwms.py"
+  conda: "envs/bpnetlite.yaml"
+  script: "scripts/compute_pwms.py"

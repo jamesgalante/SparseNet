@@ -1,4 +1,7 @@
-import os
+import os, sys
+
+THIS_DIR = os.path.dirname(__file__)   # workflow/scripts
+sys.path.insert(0, THIS_DIR)
 
 from bpnetlite.io import PeakGenerator
 from pipeline_scripts import deterministic_data_loaders as ddl
@@ -6,21 +9,23 @@ from pipeline_scripts import models as mds
 from pipeline_scripts import SAE_trainer as st
 from pipeline_scripts import save_activations as sa
 from pipeline_scripts import plot_activation_frequencies as nf
-from pipeline_scripts import create_PWM_for_nodes as pwm
 
 inp = snakemake.input
 out = snakemake.output
 params = snakemake.params
+wc = snakemake.wildcards
 
 os.makedirs(params.out_dir, exist_ok=True)
 
-p = params.sae_params
-center_len = p["center_len"]
-expansion_factor = p["expansion_factor"]
-topk_fraction = p["topk_fraction"]
-epochs = p["epochs"]
-inner_bs = p["inner_bs"]
-lr = p["lr"]
+# hyperparams from wildcards (strings) -> cast
+center_len = int(wc.cl)
+expansion_factor = float(wc.ef)
+topk_fraction = float(wc.tf)
+
+# training constants from params/config
+epochs = int(params.epochs)
+inner_bs = int(params.inner_bs)
+lr = float(params.lr)
 
 training_data = PeakGenerator(
   peaks=inp.peaks,
@@ -61,7 +66,7 @@ sae_testing_data = ddl.DeterministicPeakGenerator(
 trainer = st.SAETrainer(
   model_path=inp.model_path,
   device="cuda",
-  center_len=center_len
+  center_len=center_len,
 )
 
 trainer.train_all(
@@ -82,6 +87,7 @@ sae_models = mds.load_saes_from_dir(
   device=trainer.device,
 )
 
+# should write activations/meta.json (your downstream target)
 sa.collect_topk_indices_to_disk_from_trainer(
   trainer=trainer,
   sae_models=sae_models,
@@ -89,6 +95,7 @@ sa.collect_topk_indices_to_disk_from_trainer(
   out_dir=os.path.join(params.out_dir, "activations"),
 )
 
+# should write activations/node_activation_frequencies.png (your declared output)
 nf.plot_node_activation_frequencies(
   num_layers=len(trainer.layers),
   latent_dim=int(expansion_factor * 64),

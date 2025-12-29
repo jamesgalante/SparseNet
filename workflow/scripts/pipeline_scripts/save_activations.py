@@ -11,7 +11,7 @@ from tqdm import tqdm
 from tangermeme.predict import predict
 from bpnetlite.bpnet import ControlWrapper
 
-from scripts.SAE_trainer import activations_to_rows
+from .SAE_trainer import activations_to_rows
 
 class MultiLayerActivationHook:
 	"""Register forward hooks on multiple modules; stash outputs per layer."""

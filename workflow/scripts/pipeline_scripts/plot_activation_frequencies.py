@@ -37,4 +37,4 @@ def plot_node_activation_frequencies(num_layers: int, latent_dim: int, data_dir:
     save_path = os.path.join(data_dir, "node_activation_frequency_per_layer.png")
     plt.savefig(save_path, dpi=300)
 
-    plt.show()
+    plt.close()

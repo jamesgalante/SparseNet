@@ -286,8 +286,6 @@ def compute_pwms_for_all_layers(
     """
     os.makedirs(pwm_root_dir, exist_ok=True)
 
-    num_layers = len(trainer.layers)
- 
     meta_path = os.path.join(activations_dir, "meta.json")
     with open(meta_path) as f:
         meta = json.load(f)

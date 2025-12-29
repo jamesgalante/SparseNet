@@ -126,7 +126,7 @@ class SequenceNodeVisualizer:
     # ------------------------------------------------------------------ #
     # Main visualization: sample + heatmap
     # ------------------------------------------------------------------ #
-    def plot_sample(self, sample_idx, layer_idx=None, top_n_nodes=50):
+    def plot_sample(self, sample_idx, layer_idx=None, top_n_nodes=50, dense_yticks=False):
         """
         Plot a genomic sequence with its node activations as a heatmap.
 
@@ -263,13 +263,24 @@ class SequenceNodeVisualizer:
 
         ax2.set_ylabel("Node index (ranked by max activation)", fontsize=12)
         ax2.set_xlim(0, full_seq_len)  # align with top plot
-        ax2.set_yticks(
-            np.arange(0, top_n_nodes, max(1, top_n_nodes // 10))
-        )
-        ax2.set_yticklabels(
-            [f"{top_node_indices[i]}"
-             for i in range(0, top_n_nodes, max(1, top_n_nodes // 10))]
-        )
+        
+        # --- Toggle for dense vs sparse y-axis ticks ---
+        if dense_yticks:
+            # Show all node indices
+            ax2.set_yticks(np.arange(top_n_nodes))
+            ax2.set_yticklabels(
+                [f"{top_node_indices[i]}" for i in range(top_n_nodes)],
+                fontsize=8
+            )
+        else:
+            # Show ~10 evenly spaced ticks (original behavior)
+            ax2.set_yticks(
+                np.arange(0, top_n_nodes, max(1, top_n_nodes // 10))
+            )
+            ax2.set_yticklabels(
+                [f"{top_node_indices[i]}"
+                for i in range(0, top_n_nodes, max(1, top_n_nodes // 10))]
+            )
 
         plt.tight_layout()
         plt.show()
@@ -746,3 +757,170 @@ class SequenceNodeVisualizer:
         )
         plt.tight_layout()
         plt.show()
+
+    def _get_node_idx_from_rank(self, rank):
+        """Convert rank to node index using pwm_meta"""
+        for node_idx_str, info in self.pwm_meta["node_info"].items():
+            if info.get("rank") == rank:
+                return int(node_idx_str)
+        raise ValueError(f"No node found with rank {rank}")
+
+    def plot_node_activation_traces(self, node_rank=None, node_idx=None, 
+                                     layer_idx=None, n_samples=100, 
+                                     alpha=0.3, colormap='viridis', verbose=True):
+        """
+        Plot activation magnitude across positions for a specific node 
+        across multiple samples, with PWM logo on the left.
+        
+        Parameters
+        ----------
+        node_rank : int, optional
+            Rank of the node (from pwm_meta.json). Either this or node_idx required.
+        node_idx : int, optional
+            Direct node index. Either this or node_rank required.
+        layer_idx : int or None
+            Which SAE layer to visualize. If None, uses the PWM layer.
+        n_samples : int
+            Number of samples to plot (default 100)
+        alpha : float
+            Transparency for individual traces (default 0.3)
+        colormap : str
+            Matplotlib colormap name for coloring traces (default 'viridis')
+        verbose : bool
+            If True, print progress and statistics (default True)
+        """
+        # Determine layer
+        if layer_idx is None:
+            layer_idx = self.pwm_layer_idx
+        self._check_layer_alignment(layer_idx)
+
+        # Determine node index
+        if node_idx is None and node_rank is None:
+            raise ValueError("Must provide either node_rank or node_idx")
+        if node_idx is None:
+            node_idx = self._get_node_idx_from_rank(node_rank)
+        
+        # Get node info
+        node_info = self.pwm_meta["node_info"].get(str(node_idx), {})
+        rank = node_info.get("rank", "N/A")
+        
+        # Get PWM
+        pwm_key = f"node_{node_idx}"
+        if pwm_key not in self.pwm_data:
+            raise ValueError(f"Node {node_idx} has no PWM available")
+        
+        pfm = self.pwm_data[pwm_key]
+        
+        # Convert PFM to information content logo
+        pseudocount = 1e-4
+        pfm_pseudo = pfm + pseudocount
+        ppm = pfm_pseudo / pfm_pseudo.sum(axis=0, keepdims=True)
+        entropy = -np.sum(ppm * np.log2(ppm), axis=0)
+        ic = 2.0 - entropy
+        logo_matrix = ppm * ic
+
+        # Collect activation traces across samples
+        if verbose:
+            print(f"Collecting activation traces for node {node_idx} (rank {rank})...")
+        traces = []
+        valid_samples = 0
+        
+        # Count total samples available
+        total_samples = len(self.loader.dataset)
+        n_samples = min(n_samples, total_samples)
+        
+        for sample_idx in range(n_samples):
+            try:
+                _, _, activations = self.load_sample_data(sample_idx)
+                layer_acts = activations[:, layer_idx, :, :]
+                
+                # Build dense activation vector for this sample
+                max_idx_acts = int(layer_acts[:, :, 0].max())
+                latent_dim = max(max_idx_acts, node_idx) + 1
+                
+                dense_acts = np.zeros(self.rows_per_locus, dtype=np.float32)
+                for pos in range(self.rows_per_locus):
+                    indices = layer_acts[pos, :, 0].astype(int)
+                    values = layer_acts[pos, :, 1]
+                    mask = indices == node_idx
+                    if mask.any():
+                        dense_acts[pos] = values[mask][0]
+                
+                traces.append(dense_acts)
+                valid_samples += 1
+                
+            except Exception as e:
+                print(f"Warning: Could not load sample {sample_idx}: {e}")
+                continue
+        
+        if not traces:
+            print("No valid samples found!")
+            return
+        
+        traces = np.array(traces)  # shape: (n_samples, rows_per_locus)
+        if verbose:
+            print(f"Loaded {valid_samples} samples")
+        
+        # Create figure with PWM on left, traces on right
+        fig = plt.figure(figsize=(18, 2.5))
+        gs = fig.add_gridspec(1, 2, width_ratios=[0.6, 4], wspace=0.15)
+        
+        ax_pwm = fig.add_subplot(gs[0])
+        ax_traces = fig.add_subplot(gs[1])
+        
+        # Plot PWM logo
+        plot_logo(logo_matrix, ax=ax_pwm)
+        ax_pwm.set_title(
+            f"Node {node_idx}\n(rank {rank})",
+            fontsize=10,
+            fontweight='bold'
+        )
+        
+        # Plot activation traces
+        positions = np.arange(self.rows_per_locus)
+        cmap = plt.get_cmap(colormap)
+        colors = [cmap(i / valid_samples) for i in range(valid_samples)]
+        
+        # Plot individual traces
+        for i, trace in enumerate(traces):
+            ax_traces.plot(positions, trace, alpha=alpha, 
+                          color=colors[i], linewidth=0.8)
+        
+        # Plot mean trace
+        mean_trace = traces.mean(axis=0)
+        ax_traces.plot(positions, mean_trace, color='black', 
+                      linewidth=2.5, label='Mean', zorder=100)
+        
+        ax_traces.set_xlabel('Position (relative to activation window)', fontsize=11)
+        ax_traces.set_ylabel('Activation magnitude', fontsize=11)
+        ax_traces.set_title(
+            f'Activation traces across {valid_samples} samples (Layer {layer_idx}: {self.layer_names[layer_idx]})',
+            fontsize=11,
+            fontweight='bold'
+        )
+        ax_traces.grid(True, alpha=0.3)
+        ax_traces.legend(loc='upper right')
+        ax_traces.set_xlim(0, self.rows_per_locus - 1)
+        
+        # Add stats box
+        pct_active = (traces.max(axis=1) > 0).mean() * 100
+        stats_text = f"% samples active: {pct_active:.1f}%"
+        ax_traces.text(
+            0.02, 0.98, stats_text,
+            transform=ax_traces.transAxes,
+            verticalalignment='top',
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5),
+            fontsize=9
+        )
+        
+        plt.tight_layout()
+        plt.show()
+        
+        if verbose:
+            print(f"\n{'='*70}")
+            print(f"Node {node_idx} (rank {rank}) - Summary Statistics")
+            print(f"{'='*70}")
+            print(f"Samples analyzed: {valid_samples}")
+            print(f"Active in {(traces.max(axis=1) > 0).sum()}/{valid_samples} samples")
+            print(f"Mean activation (all positions): {mean_trace.mean():.4f}")
+            print(f"Max activation (any sample): {traces.max():.4f}")

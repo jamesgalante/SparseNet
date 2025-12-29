@@ -3,18 +3,18 @@ latent_base_channels: 64
 
 samples:
   p53:
-    peaks_bed: "resources/peaks_inliers.bed"
-    negatives_bed: "resources/gc_negatives.bed"
-    seqs: "resources/genome.fa"
-    signal_plus: "resources/experiment_plus.bw"
-    signal_minus: "resources/experiment_minus.bw"
-    ctl_plus: "resources/control_plus.bw"
-    ctl_minus: "resources/control_minus.bw"
-    model_path: "resources/model.h5"
+    peaks_bed: "peaks_inliers.bed"
+    negatives_bed: "gc_negatives.bed"
+    seqs: "genome.fa"
+    signal_plus: "experiment_plus.bw"
+    signal_minus: "experiment_minus.bw"
+    ctl_plus: "control_plus.bw"
+    ctl_minus: "control_minus.bw"
+    model_path: "model.h5"
 
 sae_grid:
-  expansion_factor: [4.0, 8.0]
-  topk_fraction: [0.05]
+  expansion_factor: [1.0] # [1.0, 2.0, 4.0, 8.0]
+  topk_fraction: [1.0] # [0.05, 0.10, 0.20]
   center_len: [1000]
   # training params (can stay scalar constants)
   epochs: 3
@@ -22,4 +22,4 @@ sae_grid:
   lr: 0.001
 
 pwm_grid:
-  num_samples_per_node: [1000, 10000]
+  num_samples_per_node: [100, 1000, 10000, 100000]

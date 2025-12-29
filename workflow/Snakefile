@@ -27,17 +27,17 @@ rule all:
 
 rule train_and_collect:
   input:
-    peaks=lambda wc: resolve_base(config["samples"][wc.sample]["peaks_bed"]),
-    negatives=lambda wc: resolve_base(config["samples"][wc.sample]["negatives_bed"]),
-    seqs=lambda wc: resolve_base(config["samples"][wc.sample]["seqs"]),
-    signal_plus=lambda wc: resolve_base(config["samples"][wc.sample]["signal_plus"]),
-    signal_minus=lambda wc: resolve_base(config["samples"][wc.sample]["signal_minus"]),
-    ctl_plus=lambda wc: resolve_base(config["samples"][wc.sample]["ctl_plus"]),
-    ctl_minus=lambda wc: resolve_base(config["samples"][wc.sample]["ctl_minus"]),
-    model_path=lambda wc: resolve_base(config["samples"][wc.sample]["model_path"])
+    peaks      = lambda wc: resolve_base(f"resources/{wc.sample}/{config['samples'][wc.sample]['peaks_bed']}"),
+    negatives  = lambda wc: resolve_base(f"resources/{wc.sample}/{config['samples'][wc.sample]['negatives_bed']}"),
+    seqs       = lambda wc: resolve_base(f"resources/{wc.sample}/{config['samples'][wc.sample]['seqs']}"),
+    signal_plus= lambda wc: resolve_base(f"resources/{wc.sample}/{config['samples'][wc.sample]['signal_plus']}"),
+    signal_minus=lambda wc: resolve_base(f"resources/{wc.sample}/{config['samples'][wc.sample]['signal_minus']}"),
+    ctl_plus   = lambda wc: resolve_base(f"resources/{wc.sample}/{config['samples'][wc.sample]['ctl_plus']}"),
+    ctl_minus  = lambda wc: resolve_base(f"resources/{wc.sample}/{config['samples'][wc.sample]['ctl_minus']}"),
+    model_path = lambda wc: resolve_base(f"resources/{wc.sample}/{config['samples'][wc.sample]['model_path']}")
   output:
     meta=resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}/activations/meta.json"),
-    freq_plot=resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}/activations/node_activation_frequencies.png")
+    freq_plot=resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}/activations/node_activation_frequency_per_layer.png")
   params:
     out_dir=resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}"),
     epochs=config["sae_grid"]["epochs"],
@@ -45,19 +45,20 @@ rule train_and_collect:
     lr=config["sae_grid"]["lr"]
   conda: "envs/bpnetlite.yaml"
   resources:
-    gpu=1
+    slurm_partition = "akundaje",
+    gpu = 1,
+    tasks_per_gpu = 0,
+    runtime = "3h"
   script: "scripts/train_and_collect.py"
-
+  
 rule compute_pwms:
   input:
     activations_meta=resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}/activations/meta.json"),
-    peaks=lambda wc: resolve_base(config["samples"][wc.sample]["peaks_bed"]),
-    negatives=lambda wc: resolve_base(config["samples"][wc.sample]["negatives_bed"]),
-    seqs=lambda wc: resolve_base(config["samples"][wc.sample]["seqs"]),
-    signal_plus=lambda wc: resolve_base(config["samples"][wc.sample]["signal_plus"]),
-    signal_minus=lambda wc: resolve_base(config["samples"][wc.sample]["signal_minus"]),
-    ctl_plus=lambda wc: resolve_base(config["samples"][wc.sample]["ctl_plus"]),
-    ctl_minus=lambda wc: resolve_base(config["samples"][wc.sample]["ctl_minus"])
+    peaks      = lambda wc: resolve_base(f"resources/{wc.sample}/{config['samples'][wc.sample]['peaks_bed']}"),
+    negatives  = lambda wc: resolve_base(f"resources/{wc.sample}/{config['samples'][wc.sample]['negatives_bed']}"),
+    seqs       = lambda wc: resolve_base(f"resources/{wc.sample}/{config['samples'][wc.sample]['seqs']}"),
+    signal_plus= lambda wc: resolve_base(f"resources/{wc.sample}/{config['samples'][wc.sample]['signal_plus']}"),
+    signal_minus=lambda wc: resolve_base(f"resources/{wc.sample}/{config['samples'][wc.sample]['signal_minus']}")
   output:
     done=resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}/pwms/ns{ns}/.done")
   params:
@@ -65,4 +66,8 @@ rule compute_pwms:
     pwm_root_dir=resolve_base("results/{sample}/sae/ef{ef}_tf{tf}_cl{cl}/pwms/ns{ns}"),
     latent_base_channels=config.get("latent_base_channels", 64)
   conda: "envs/bpnetlite.yaml"
+  resources:
+    slurm_partition = "normal",
+    mem = "48G",
+    time = "8h"
   script: "scripts/compute_pwms.py"

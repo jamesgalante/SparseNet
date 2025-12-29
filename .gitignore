@@ -1,2 +1,3 @@
 ARCHIVE/
 .snakemake/
+workflow/rules/
